@@ -13,7 +13,8 @@ import (
 // Option option
 type Option func(*config)
 
-// WithDeviceToken 设置device token 只在SecureModeNoPreRegistration时需设置
+// WithDeviceToken 设置device token
+// NOTE: 只在SecureModeNoPreRegistration时有效,其它忽略
 func WithDeviceToken(deviceToken string) Option {
 	return func(c *config) {
 		c.deviceToken = deviceToken
@@ -41,19 +42,17 @@ func WithSecureMode(secureMode string) Option {
 	}
 }
 
-// WithEnableDeviceModel 设置是否支持物模型,默认为物模型
-func WithEnableDeviceModel(enable bool) Option {
+// WithDeviceModel 设置是否支持物模型,默认为物模型
+func WithDeviceModel(enable bool) Option {
 	return func(c *config) {
 		c.enableDM = enable
 	}
 }
 
-// WithExtRRPC 支持扩展RRPC 仅物模型下支持
+// WithExtRRPC 支持扩展RRPC 仅物模型下支持,默认不支持
 func WithExtRRPC() Option {
 	return func(c *config) {
-		if _, ok := c.extParams["v"]; ok {
-			c.extParams["ext"] = "1"
-		}
+		c.extRRPC = true
 	}
 }
 

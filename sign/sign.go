@@ -64,6 +64,7 @@ type config struct {
 	deviceToken string            // only use on SecureModeNoPreRegistration
 	method      string            // 签名方法
 	enableDM    bool              // 使能物模型
+	extRRPC     bool              // 物模型下,支持扩展RRPC
 	port        uint16            // 端口,默认为1883
 	timestamp   int64             // 表示当前时间的毫秒值,可以不传递, 默认 fixedTimestamp
 	extParams   map[string]string // clientID扩展参数
@@ -83,67 +84,59 @@ func Generate(triad infra.MetaTriad, crd infra.CloudRegionDomain, opts ...Option
 	c := &config{
 		SecureModeTCPDirectPlain,
 		"",
-		"hmacsha256",
+		hmacsha256,
 		true,
+		false,
 		1883,
 		fixedTimestamp,
 		map[string]string{
 			"securemode": SecureModeTCPDirectPlain,
 			"signmethod": hmacsha256,
+			"gw":         "0",
+			"ext":        "0",
 			"lan":        "Golang",
-			"v":          alinkVersion,
 		},
 	}
 	for _, opt := range opts {
 		opt(c)
 	}
+
 	c.extParams["timestamp"] = strconv.FormatInt(c.timestamp, 10)
-	if c.enableDM {
+	if c.enableDM && c.extRRPC {
+		c.extParams["ext"] = "1"
+	}
+	if !c.enableDM {
 		c.extParams["v"] = alinkVersion
 		delete(c.extParams, "gw")
 		delete(c.extParams, "ext")
-	} else {
-		delete(c.extParams, "v")
-		c.extParams["gw"] = "0"
-		c.extParams["ext"] = "0"
 	}
 
 	var enableTLS bool // 使能tls
 	switch c.secureMode {
 	case SecureModeNoPreRegistration:
-		c.extParams["securemode"] = SecureModeNoPreRegistration
 		panic("feature not support")
-	case SecureModeTLSGuider:
+	case SecureModeTLSGuider, SecureModeTLSDirect, SecureModeITLSDNSID2:
 		enableTLS = true
-		c.extParams["securemode"] = SecureModeTLSGuider
-	case SecureModeTLSDirect:
-		enableTLS = true
-		c.extParams["securemode"] = SecureModeTLSDirect
-	case SecureModeITLSDNSID2:
-		enableTLS = true
-		c.extParams["securemode"] = SecureModeITLSDNSID2
-	case SecureModeTCPDirectPlain:
-		fallthrough
-	default:
+	default: // SecureModeTCPDirectPlain
+		c.secureMode = SecureModeTCPDirectPlain
 		enableTLS = false
-		c.extParams["securemode"] = SecureModeTCPDirectPlain
 	}
+	c.extParams["securemode"] = c.secureMode
 
 	schema := "tcp://"
 	if enableTLS {
 		schema = "tls://"
 	}
+
 	// setup HostName
-	buildHost := strings.Builder{}
-	buildHost.WriteString(triad.ProductKey)
-	buildHost.WriteString(".")
-	if crd.Region != infra.CloudRegionCustom {
-		buildHost.WriteString(infra.MQTTCloudDomain[crd.Region])
+	hostname := triad.ProductKey + "."
+	if crd.Region == infra.CloudRegionCustom {
+		hostname += crd.CustomDomain
 	} else {
-		buildHost.WriteString(crd.CustomDomain)
+		hostname += infra.MQTTCloudDomain[crd.Region]
 	}
-	hostname := buildHost.String()
-	addr := schema + net.JoinHostPort(hostname, strconv.FormatUint(uint64(c.port), 10))
+
+	addr := schema + net.JoinHostPort(hostname, strconv.Itoa(int(c.port)))
 	username := triad.DeviceName + "&" + triad.ProductKey
 
 	if c.secureMode == SecureModeNoPreRegistration {
@@ -162,15 +155,11 @@ func Generate(triad infra.MetaTriad, crd infra.CloudRegionDomain, opts ...Option
 	}
 
 	switch c.method {
-	case hmacsha1:
-		c.extParams["signmethod"] = hmacsha1
-	case hmacmd5:
-		c.extParams["signmethod"] = hmacmd5
-	case hmacsha256:
-		fallthrough
+	case hmacsha1, hmacmd5, hmacsha256:
 	default:
 		c.method = hmacsha256
 	}
+	c.extParams["signmethod"] = c.method
 	// setup ClientID,Password
 	clientID, pwd := infra.CalcSign(c.method, triad, c.timestamp)
 	return &Sign{
